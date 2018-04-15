@@ -11,7 +11,9 @@ import requests
 root_path = Path(__file__).parent
 tmp_path = root_path.joinpath('tmp')
 repo_path = tmp_path.joinpath('repo')
-queue = asyncio.Queue(maxsize=4)
+
+repo_queue = asyncio.Queue(maxsize=1)
+venv_queue = asyncio.Queue(maxsize=4)
 
 
 def iter_django_versions():
@@ -37,7 +39,7 @@ async def run_command(*args):
 
 
 async def prepare_venv(django_version):
-    await queue.put(django_version)
+    await venv_queue.put(django_version)
     print(django_version)
 
     venv_path = tmp_path.joinpath(f'vevn_{django_version}')
@@ -45,6 +47,7 @@ async def prepare_venv(django_version):
     pip_path = venv_path.joinpath('bin/pip')
     django_admin_path = venv_path.joinpath('bin/django-admin.py')
     if django_admin_path.exists():
+        await repo_queue.put(django_version)
         return
 
     if django_version >= '1.11':
@@ -56,8 +59,7 @@ async def prepare_venv(django_version):
     await run_command(pip_path, 'install', '-U', 'pip')
     await run_command(pip_path, 'install', f'Django=={django_version}')
 
-    await queue.get()
-    queue.task_done()
+    await repo_queue.put(django_version)
 
 
 def repo_run_command(*args, check=False):
@@ -104,14 +106,24 @@ def prepare_branch(django_version):
     repo_run_command('git', 'commit', '-m', f'Django v{django_version}')
 
 
+async def prepare_branches():
+    while not venv_queue.empty():
+        django_version = await repo_queue.get()
+        await venv_queue.get()
+        venv_queue.task_done()
+
+        prepare_branch(django_version)
+
+        repo_queue.task_done()
+
+
 def main():
     django_versions = list(iter_django_versions())
     loop = asyncio.get_event_loop()
 
     loop.run_until_complete(asyncio.gather(
-        prepare_repo(), *map(prepare_venv, django_versions)))
-
-    list(map(prepare_branch, django_versions))
+        prepare_repo(), prepare_branches(),
+        *map(prepare_venv, django_versions)))
 
     loop.close()
 
