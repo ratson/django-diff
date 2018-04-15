@@ -3,6 +3,7 @@ import re
 import shutil
 import subprocess
 import sys
+from distutils.version import LooseVersion
 from pathlib import Path
 
 import requests
@@ -50,7 +51,7 @@ async def prepare_venv(django_version):
         await repo_queue.put(django_version)
         return
 
-    if django_version >= '1.11':
+    if LooseVersion(django_version) >= LooseVersion('1.11'):
         await run_command('/usr/local/bin/python3', '-m', 'venv', venv_path)
     else:
         await run_command(
@@ -95,12 +96,13 @@ def prepare_branch(django_version):
         repo_run_command(django_admin_path, 'startproject', 'project')
 
     settings_path = repo_path.joinpath('project/settings.py')
-    with settings_path.open() as f:
-        settings_text = f.read()
-    with settings_path.open('wt') as f:
-        f.write(re.sub(
-            r"SECRET_KEY = '([^']+)'", "SECRET_KEY = '{SECRET_KEY}'",
-            settings_text))
+    if settings_path.exists():
+        with settings_path.open() as f:
+            settings_text = f.read()
+        with settings_path.open('w') as f:
+            f.write(re.sub(
+                r"SECRET_KEY = '([^']+)'", "SECRET_KEY = '{SECRET_KEY}'",
+                settings_text))
 
     repo_run_command('git', 'add', '--all', '.')
     repo_run_command('git', 'commit', '-m', f'Django v{django_version}')
