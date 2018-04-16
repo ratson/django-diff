@@ -1,4 +1,5 @@
 import asyncio
+import os
 import re
 import shutil
 import subprocess
@@ -10,7 +11,7 @@ import requests
 
 
 root_path = Path(__file__).parent
-tmp_path = root_path.joinpath('tmp')
+tmp_path = Path(os.getenv('TEMP_PATH', root_path.joinpath('tmp')))
 repo_path = tmp_path.joinpath('repo')
 
 repo_queue = asyncio.Queue(maxsize=1)
@@ -20,7 +21,7 @@ venv_queue = asyncio.Queue(maxsize=4)
 def iter_django_versions():
     r = requests.get('https://pypi.org/pypi/Django/json')
     for version, files in r.json()['releases'].items():
-        if files:
+        if files and re.match(r'^[0-9.]+$', version):
             yield version
 
 
