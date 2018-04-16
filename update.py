@@ -26,7 +26,6 @@ def iter_django_versions():
 
 
 async def prepare_repo():
-    repo_path.mkdir(parents=True, exist_ok=True)
     dot_git_path = repo_path.joinpath('.git')
     if dot_git_path.exists():
         return
@@ -90,20 +89,19 @@ def prepare_branch(django_version):
             shutil.rmtree(p)
     repo_run_command('git', 'clean', '-qfdx')
 
-    if b'[directory]' in repo_run_command(django_admin_path,
-                                          'startproject', '--help'):
-        repo_run_command(django_admin_path, 'startproject', 'project', '.')
-    else:
-        repo_run_command(django_admin_path, 'startproject', 'project')
+    repo_run_command(django_admin_path, 'startproject', 'project')
 
-    settings_path = repo_path.joinpath('project/settings.py')
-    if settings_path.exists():
-        with settings_path.open() as f:
-            settings_text = f.read()
-        with settings_path.open('w') as f:
-            f.write(re.sub(
-                r"SECRET_KEY = '([^']+)'", "SECRET_KEY = '{SECRET_KEY}'",
-                settings_text))
+    settings_path = repo_path.joinpath('project/project/settings.py')
+    if not settings_path.exists():
+        settings_path = repo_path.joinpath('project/settings.py')
+    assert settings_path.exists(), f'unexpected directory structure'
+
+    with settings_path.open() as f:
+        settings_text = f.read()
+    with settings_path.open('w') as f:
+        f.write(re.sub(
+            r"SECRET_KEY = '([^']+)'", "SECRET_KEY = '{SECRET_KEY}'",
+            settings_text))
 
     repo_run_command('git', 'add', '--all', '.')
     repo_run_command('git', 'commit', '-m', f'Django v{django_version}')
@@ -124,6 +122,7 @@ def main():
     django_versions = list(iter_django_versions())
     loop = asyncio.get_event_loop()
 
+    repo_path.mkdir(parents=True, exist_ok=True)
     loop.run_until_complete(asyncio.gather(
         prepare_repo(), prepare_branches(),
         *map(prepare_venv, django_versions)))
