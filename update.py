@@ -97,7 +97,8 @@ def prepare_branch(django_version):
     assert settings_path.exists(), f'unexpected directory structure'
 
     with settings_path.open() as f:
-        settings_text = f.read()
+        settings_text = f.read().replace(f'Django {django_version}',
+                                         'Django {VERSION}')
     with settings_path.open('w') as f:
         f.write(re.sub(
             r"SECRET_KEY = '([^']+)'", "SECRET_KEY = '{SECRET_KEY}'",
