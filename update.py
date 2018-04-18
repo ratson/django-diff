@@ -144,7 +144,8 @@ def main():
         *map(prepare_venv, django_versions)))
     loop.close()
 
-    with root_path.joinpath('README.md').open() as f:
+    readme_path = root_path.joinpath('README.md')
+    with readme_path.open() as f:
         readme_content = f.read()
     m = re.match(r'(.+\| -+ \| -+ \| -+ \|\s+).*\|[^|]+\| - \| - \|(.+)',
                  readme_content, re.DOTALL)
@@ -153,7 +154,7 @@ def main():
         '\n'.join(reversed(list(iter_table_lines(django_versions)))),
         m.group(2),
     ])
-    with root_path.joinpath('README.md').open('w') as f:
+    with readme_path.open('w') as f:
         f.write(readme_content)
 
 
