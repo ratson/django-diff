@@ -14,7 +14,6 @@ root_path = Path(__file__).parent
 tmp_path = Path(os.getenv('TEMP_PATH', root_path.joinpath('tmp')))
 repo_path = tmp_path.joinpath('repo')
 
-repo_queue = asyncio.Queue(maxsize=1)
 venv_queue = asyncio.Queue(maxsize=4)
 
 
@@ -25,10 +24,11 @@ def iter_django_versions():
             yield version
 
 
-async def prepare_repo():
+def prepare_repo():
     dot_git_path = repo_path.joinpath('.git')
     if dot_git_path.exists():
         return
+    repo_path.mkdir(parents=True, exist_ok=True)
     shutil.copytree(root_path.joinpath('.git'), dot_git_path)
 
 
@@ -48,7 +48,8 @@ async def prepare_venv(django_version):
     pip_path = venv_path.joinpath('bin/pip')
     django_admin_path = venv_path.joinpath('bin/django-admin.py')
     if django_admin_path.exists():
-        await repo_queue.put(django_version)
+        await venv_queue.get()
+        venv_queue.task_done()
         return
 
     if LooseVersion(django_version) >= LooseVersion('1.11'):
@@ -60,7 +61,8 @@ async def prepare_venv(django_version):
     await run_command(pip_path, 'install', '-U', 'pip')
     await run_command(pip_path, 'install', f'Django=={django_version}')
 
-    await repo_queue.put(django_version)
+    await venv_queue.get()
+    venv_queue.task_done()
 
 
 def repo_run_command(*args, check=False):
@@ -69,17 +71,14 @@ def repo_run_command(*args, check=False):
     return process.stdout.decode(sys.getfilesystemencoding()).strip()
 
 
+def build_tag(django_version):
+    return f'django-{django_version}'
+
 def prepare_branch(django_version):
     venv_path = tmp_path.joinpath(f'venv_{django_version}')
     django_admin_path = venv_path.joinpath('bin/django-admin.py').resolve()
-    branch_name = f'django/v{django_version}'
-    try:
-        repo_run_command('git', 'checkout', '--orphan', branch_name,
-                         check=True)
-        repo_run_command('git', 'reset', '--hard')
-    except subprocess.CalledProcessError:
-        repo_run_command('git', 'checkout', '--force', branch_name)
 
+    repo_run_command('git', 'reset', '--hard')
     for p in repo_path.glob('*'):
         if p.name == '.git':
             continue
@@ -106,17 +105,24 @@ def prepare_branch(django_version):
 
     repo_run_command('git', 'add', '--all', '.')
     repo_run_command('git', 'commit', '-m', f'Django v{django_version}')
+    repo_run_command('git', 'tag', '-f', build_tag(django_version))
 
 
-async def prepare_branches():
-    while not venv_queue.empty():
-        django_version = await repo_queue.get()
-        await venv_queue.get()
-        venv_queue.task_done()
-
+def build_diff_branch(django_versions):
+    branch_name = 'diff'
+    for branch in repo_run_command('git', 'branch').split('\n'):
+        branch = branch.strip('* ')
+        if branch == branch_name:
+            continue
+        repo_run_command('git', 'branch', '-D', branch)
+    try:
+        repo_run_command('git', 'checkout', '--orphan', branch_name,
+                         check=True)
+    except subprocess.CalledProcessError:
+        repo_run_command('git', 'checkout', '--force', branch_name)
+    for django_version in django_versions:
+        print(build_tag(django_version))
         prepare_branch(django_version)
-
-        repo_queue.task_done()
 
 
 def iter_table_lines(django_versions):
@@ -125,25 +131,26 @@ def iter_table_lines(django_versions):
         if last_version is None:
             yield f'| {version} | - | - |'
         else:
-            branch_base = f'django/v{last_version}'
-            branch_head = f'django/v{version}'
-            version_range = '...'.join([branch_base, branch_head])
+            diff_base = build_tag(last_version)
+            diff_head = build_tag(version)
+            version_range = '...'.join([diff_base, diff_head])
             compare_url = f'https://github.com/ratson/django-diff/compare/{version_range}'
             stats = repo_run_command('git', 'diff', '--shortstat',
-                                     branch_base, branch_head)
+                                     diff_base, diff_head)
             yield f'| {version} | [{version_range}]({compare_url}) | {stats} |'
         last_version = version
 
 
 def main():
     django_versions = list(iter_django_versions())
-    repo_path.mkdir(parents=True, exist_ok=True)
+    prepare_repo()
 
     loop = asyncio.get_event_loop()
     loop.run_until_complete(asyncio.gather(
-        prepare_repo(), prepare_branches(),
         *map(prepare_venv, django_versions)))
     loop.close()
+
+    build_diff_branch(django_versions)
 
     readme_path = root_path.joinpath('README.md')
     with readme_path.open() as f:
